@@ -1,11 +1,12 @@
 import os
 import asyncio
-from telethon import TelegramClient
-from telethon.sessions import StringSession
-from http.server import BaseHTTPRequestHandler, HTTPServer
 import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
+import requests
+from telethon import TelegramClient, events
+from telethon.sessions import StringSession
 
-# --- Обманка для Render (запуск фейкового веб-сервера) ---
+# --- Обманка портов для Render ---
 class WebServerHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -16,28 +17,63 @@ class WebServerHandler(BaseHTTPRequestHandler):
 def run_web_server():
     port = int(os.environ.get("PORT", 10000))
     server = HTTPServer(("0.0.0.0", port), WebServerHandler)
-    print(f"Фейковый веб-сервер запущен на порту {port}")
     server.serve_forever()
 
-# Запускаем сервер в отдельном потоке, чтобы он не мешал боту
 threading.Thread(target=run_web_server, daemon=True).start()
-# --------------------------------------------------------
 
-# Получаем данные из настроек Render
+# --- Настройки Telegram ---
 API_ID = os.environ.get("API_ID")
 API_HASH = os.environ.get("API_HASH")
 SESSION_STRING = os.environ.get("SESSION_STRING")
 
 if not all([API_ID, API_HASH, SESSION_STRING]):
-    print("Ошибка: Переменные API_ID, API_HASH или SESSION_STRING не заданы в Render!")
+    print("Ошибка: API_ID, API_HASH или SESSION_STRING не заданы в Render!")
     exit(1)
 
 client = TelegramClient(StringSession(SESSION_STRING), int(API_ID), API_HASH)
 
+# --- Логика работы с Llama ---
+def ask_llama(prompt):
+    # Используем бесплатный быстрый инференс Llama 3
+    url = "https://api-inference.huggingface.co/models/meta-llama/Meta-Llama-3-8B-Instruct"
+    headers = {"Content-Type": "application/json"}
+    payload = {
+        "inputs": f"<|begin_of_text|><|start_header_id|>system<|end_header_id|>\nТы — Нэса, дерзкий и умный ИИ-ассистент. Отвечай кратко, чётко, на русском языке.<|eot_id|><|start_header_id|>user<|end_header_id|>\n{prompt}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n",
+        "parameters": {"max_new_tokens": 250, "temperature": 0.7}
+    }
+    try:
+        response = requests.post(url, headers=headers, json=payload, timeout=20)
+        if response.status_code == 200:
+            data = response.json()
+            # Убираем системный промпт из ответа, оставляя только чистый текст
+            result = data[0]["generated_text"].split("<|start_header_id|>assistant<|end_header_id|>\n")[-1]
+            return result.strip()
+        elif response.status_code == 503:
+            return "Модель сейчас загружается на сервере Hugging Face, подожди пару секунд и повтори запрос."
+        return f"Ошибка сервера Llama: статус {response.status_code}"
+    except Exception as e:
+        return f"Не удалось связаться с Llama: {str(e)}"
+
+# --- Обработка команд в Telegram ---
+@client.on(events.NewMessage(outgoing=True, pattern=r"^\.ии (.+)"))
+async def ai_handler(event):
+    question = event.pattern_match.group(1)
+    await event.edit(f"**Нэса думает...** 🧠")
+    
+    # Запускаем запрос в отдельном потоке, чтобы Telegram не зависал
+    loop = asyncio.get_event_loop()
+    answer = await loop.run_in_executor(None, ask_llama, question)
+    
+    await event.edit(f"**Вопрос:** {question}\n\n**Ответ Нэсы:**\n{answer}")
+
+@client.on(events.NewMessage(outgoing=True, pattern=r"^\.ping"))
+async def ping_handler(event):
+    await event.edit("**Юзербот Нэса успешно работает, Llama на связи!**")
+
 async def main():
-    print("Нэса успешно подключается к Telegram...")
+    print("Нэса подключается к Telegram...")
     await client.start()
-    print("Юзербот запущен и готов к работе!")
+    print("Юзербот запущен!")
     await client.run_until_disconnected()
 
 if __name__ == "__main__":
