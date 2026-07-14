@@ -15,10 +15,9 @@ class WebServerHandler(BaseHTTPRequestHandler):
 
 async def start_web_server():
     port = int(os.environ.get("PORT", 10000))
-    # Запуск сервера без блокировки основного потока asyncio
     server = HTTPServer(("0.0.0.0", port), WebServerHandler)
     loop = asyncio.get_running_loop()
-    print(f"Фейковый веб-сервер запущен на порту {port}")
+    print(f"Фейковый веб-сервер запущен на порту {port}", flush=True)
     await loop.run_in_executor(None, server.serve_forever)
 
 # --- Настройки Telegram ---
@@ -27,10 +26,10 @@ API_HASH = os.environ.get("API_HASH")
 RAW_SESSION = os.environ.get("SESSION_STRING")
 
 if not all([API_ID, API_HASH, RAW_SESSION]):
-    print("Ошибка: API_ID, API_HASH или SESSION_STRING не заданы в Render!")
+    print("Ошибка: API_ID, API_HASH или SESSION_STRING не заданы в Render!", flush=True)
     exit(1)
 
-# Автоматически очищаем строку сессии от переносов строк, пробелов и мусора
+# Автоматически очищаем строку сессии от любых переносов строк и пробелов
 SESSION_STRING = "".join(RAW_SESSION.split())
 
 client = TelegramClient(StringSession(SESSION_STRING), int(API_ID), API_HASH)
@@ -74,10 +73,18 @@ async def main():
     # Запускаем веб-сервер фоном внутри asyncio
     asyncio.create_task(start_web_server())
     
-    print("Нэса подключается к Telegram...")
-    await client.start()
-    print("Юзербот успешно запущен и авторизован!")
-    await client.run_until_disconnected()
+    print("Нэса подключается к Telegram...", flush=True)
+    try:
+        await client.connect()
+        if not await client.is_user_authorized():
+            print("КРИТИЧЕСКАЯ ОШИБКА: Сессия не авторизована или устарела! Тебе нужно сгенерировать новую SESSION_STRING.", flush=True)
+            return
+        
+        print("Юзербот успешно запущен и авторизован в сети!", flush=True)
+        await client.run_until_disconnected()
+    except Exception as e:
+        print(f"Произошла ошибка при подключении: {e}", flush=True)
 
 if __name__ == "__main__":
     asyncio.run(main())
+    
