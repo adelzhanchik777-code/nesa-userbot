@@ -1,12 +1,11 @@
 import os
 import asyncio
-import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import requests
 from telethon import TelegramClient, events
 from telethon.sessions import StringSession
 
-# --- Обманка портов для Render ---
+# --- Обманка портов для Render (Асинхронный запуск) ---
 class WebServerHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -14,12 +13,13 @@ class WebServerHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(b"Bot is running alive!")
 
-def run_web_server():
+async def start_web_server():
     port = int(os.environ.get("PORT", 10000))
+    # Запуск сервера без блокировки основного потока asyncio
     server = HTTPServer(("0.0.0.0", port), WebServerHandler)
-    server.serve_forever()
-
-threading.Thread(target=run_web_server, daemon=True).start()
+    loop = asyncio.get_running_loop()
+    print(f"Фейковый веб-сервер запущен на порту {port}")
+    await loop.run_in_executor(None, server.serve_forever)
 
 # --- Настройки Telegram ---
 API_ID = os.environ.get("API_ID")
@@ -61,7 +61,6 @@ async def ai_handler(event):
     question = event.pattern_match.group(1)
     await event.edit(f"**Нэса думает...** 🧠")
     
-    # Запускаем запрос в отдельном потоке, чтобы Telegram не зависал
     loop = asyncio.get_event_loop()
     answer = await loop.run_in_executor(None, ask_llama, question)
     
@@ -72,11 +71,13 @@ async def ping_handler(event):
     await event.edit("**Юзербот Нэса успешно работает, Llama на связи!**")
 
 async def main():
+    # Запускаем веб-сервер фоном внутри asyncio
+    asyncio.create_task(start_web_server())
+    
     print("Нэса подключается к Telegram...")
     await client.start()
-    print("Юзербот запущен и готов к работе!")
+    print("Юзербот успешно запущен и авторизован!")
     await client.run_until_disconnected()
 
 if __name__ == "__main__":
     asyncio.run(main())
-    
