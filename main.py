@@ -24,17 +24,19 @@ threading.Thread(target=run_web_server, daemon=True).start()
 # --- Настройки Telegram ---
 API_ID = os.environ.get("API_ID")
 API_HASH = os.environ.get("API_HASH")
-SESSION_STRING = os.environ.get("SESSION_STRING")
+RAW_SESSION = os.environ.get("SESSION_STRING")
 
-if not all([API_ID, API_HASH, SESSION_STRING]):
+if not all([API_ID, API_HASH, RAW_SESSION]):
     print("Ошибка: API_ID, API_HASH или SESSION_STRING не заданы в Render!")
     exit(1)
+
+# Автоматически очищаем строку сессии от переносов строк, пробелов и мусора
+SESSION_STRING = "".join(RAW_SESSION.split())
 
 client = TelegramClient(StringSession(SESSION_STRING), int(API_ID), API_HASH)
 
 # --- Логика работы с Llama ---
 def ask_llama(prompt):
-    # Используем бесплатный быстрый инференс Llama 3
     url = "https://api-inference.huggingface.co/models/meta-llama/Meta-Llama-3-8B-Instruct"
     headers = {"Content-Type": "application/json"}
     payload = {
@@ -45,7 +47,6 @@ def ask_llama(prompt):
         response = requests.post(url, headers=headers, json=payload, timeout=20)
         if response.status_code == 200:
             data = response.json()
-            # Убираем системный промпт из ответа, оставляя только чистый текст
             result = data[0]["generated_text"].split("<|start_header_id|>assistant<|end_header_id|>\n")[-1]
             return result.strip()
         elif response.status_code == 503:
@@ -73,7 +74,7 @@ async def ping_handler(event):
 async def main():
     print("Нэса подключается к Telegram...")
     await client.start()
-    print("Юзербот запущен!")
+    print("Юзербот запущен и готов к работе!")
     await client.run_until_disconnected()
 
 if __name__ == "__main__":
